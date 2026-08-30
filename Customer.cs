@@ -10,6 +10,9 @@ public class Customer
     public string? cre_date { get; set; }
     public string? cha_date { get; set; }
 
+    public Customer()
+    {
+    }
     public Customer(string ParId)
     {
         id = ParId;
