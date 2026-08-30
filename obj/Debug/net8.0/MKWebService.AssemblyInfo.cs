@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("MKWebService")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6d899017db17313444d49101926a7c466d7b4a63")]
 [assembly: System.Reflection.AssemblyProductAttribute("MKWebService")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MKWebService")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
