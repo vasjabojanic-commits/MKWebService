@@ -9,6 +9,21 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
+// Get API key from configuration
+var apiKey = app.Configuration["AppSettings:ApiKey"];
+
+if (string.IsNullOrWhiteSpace(apiKey))
+{
+    throw new InvalidOperationException("API key is not configured.");
+}
+
+var connectionString = app.Configuration["AppSettings:ConnectionString"];
+
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException("Connection string is not configured.");
+}
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -18,33 +33,42 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
+// API key middleware
+app.Use(async (context, next) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
-
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
-
-app.MapPost("/CustomerEcho", (Customer cust) =>
-{
-    return Results.Json(new
+    // Allow Swagger without API key in Development
+    if (app.Environment.IsDevelopment() &&
+        context.Request.Path.StartsWithSegments("/swagger"))
     {
-        Message = $"Customer {cust.name} is on address {cust.address}."
-    });
+        await next();
+        return;
+    }
+
+    // Read API key from ApiKey header
+    if (!context.Request.Headers.TryGetValue("ApiKey", out var providedApiKey))
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            Error = "API key is required."
+        });
+        return;
+    }
+
+    // Compare API keys
+    if (providedApiKey != apiKey)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        await context.Response.WriteAsJsonAsync(new
+        {
+            Error = "Invalid API key."
+        });
+        return;
+    }
+
+    await next();
 });
+
 
 app.MapPost("/Customer", async (HttpRequest request) =>
 {
@@ -55,28 +79,50 @@ app.MapPost("/Customer", async (HttpRequest request) =>
 
         // Optional: parse JSON manually
         var jsonDoc = JsonDocument.Parse(body);
-        if(jsonDoc.RootElement.TryGetProperty("id", out JsonElement idElement))
-        {
-            var id = idElement.GetString();
-            var cust = new Customer(id);
-            if(jsonDoc.RootElement.TryGetProperty("name", out JsonElement nameElement))
-                cust.name = nameElement.GetString();
-            if(jsonDoc.RootElement.TryGetProperty("address", out JsonElement addressElement))
-                cust.address = addressElement.GetString();
-            if(jsonDoc.RootElement.TryGetProperty("headquarters", out JsonElement headquartersElement))
-                cust.headquarters = headquartersElement.GetString();
-            if(jsonDoc.RootElement.TryGetProperty("country", out JsonElement countryElement))
-                cust.country = countryElement.GetString();
-            if(jsonDoc.RootElement.TryGetProperty("telephone_1", out JsonElement telephone_1Element))
-                cust.telephone_1 = telephone_1Element.GetString();
-            if(jsonDoc.RootElement.TryGetProperty("email_1", out JsonElement email_1Element))
-                cust.email_1 = email_1Element.GetString();
-            if(jsonDoc.RootElement.TryGetProperty("cre_date", out JsonElement cre_dateElement))
-                cust.cre_date = cre_dateElement.GetString();
-            if(jsonDoc.RootElement.TryGetProperty("cha_date", out JsonElement cha_dateElement))
-                cust.cha_date = cha_dateElement.GetString();
 
-            return Results.Ok(new {UpdatedId = cust.id});
+        if(jsonDoc.RootElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement el in jsonDoc.RootElement.EnumerateArray())
+            {
+                var cust = new Customer();
+                cust.FillFromJsonElement(el);
+                try
+                {
+                    var result = await cust.SendToDb(connectionString);
+                }
+                catch (Exception)
+                {
+                    return Results.Problem(
+                        "An error occurred while updating the database.", statusCode:StatusCodes.Status500InternalServerError);
+                }                
+            }
+            return Results.Ok(new
+            {
+                Id = "0",
+                Result = "Success"
+            });
+        }
+        else if(jsonDoc.RootElement.TryGetProperty("id", out JsonElement idElement))
+        {
+            var cust = new Customer();
+            cust.FillFromJsonElement(jsonDoc.RootElement);
+
+            try
+            {
+                var result = await cust.SendToDb(connectionString);
+
+                return Results.Ok(new
+                {
+                    Id = result.Id,
+                    Result = result.Result
+                });
+            }
+            catch (Exception)
+            {
+                return Results.Problem(
+                    "An error occurred while updating the database.", statusCode:StatusCodes.Status500InternalServerError);
+            }
+
         }
         else
         {
@@ -90,8 +136,3 @@ app.MapPost("/Customer", async (HttpRequest request) =>
 });
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
